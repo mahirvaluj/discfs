@@ -1,7 +1,7 @@
 (defpackage :discfs
   (:use :cl :lispcord))
-
 (in-package :discfs)
+
 ;; This is to load the token
 (load #p"secret.lisp")
 (if *token*
@@ -23,4 +23,5 @@
 
 
 (defun start (channel-id)
-  (connect *discfs*))
+  (connect *discfs*)
+  )
