@@ -73,19 +73,22 @@
   (setf *mntc* (lispcord.http:from-id channel-id :channel))
   (assert (not (= 0 (length (lispcord.http:get-pinned *mntc*))))))
 
-(defun reg (id path)
-  "this will add the hash to the filesystem in the given message. if
-  the message is too full, go to NEXT message"
-  (let ((msg (lispcord.http:from-id id :message)))
-    ()) )
-
-(defun put (path)
-  "this will upload file into filesystem, and then return the hash at
-  which this is stored, or NIL on error")
+(defun put (stream)
+  "upload file into filesystem, and then return the hash at which this
+  is stored, or NIL on error")
 
 (defun del (hash)
-  "this will delete file with given hash from filesystem, returning T
-  on delete, NIL on no delete")
+  "delete file with given hash from filesystem, returning T on delete,
+  NIL on no delete")
+
+(defun get (hash)
+  "get binary file from filesystem. returns '(unsigned-byte 8) stream")
+
+;; (defun reg (id path)
+;;   "this will add the hash to the filesystem in the given message. if
+;;   the message is too full, go to NEXT message"
+;;   (let ((msg (lispcord.http:from-id id :message)))
+;;     ) )
 
 (defun start ()
   (connect *discfs*))
