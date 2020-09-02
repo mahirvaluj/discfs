@@ -1,1 +1,1 @@
-(defparameter *token* nil)
+(defvar *token* nil)
