@@ -1,1 +1,1 @@
-(defparameter *token* "TOKEN")
+(defparameter *token* nil)
