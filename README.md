@@ -10,7 +10,7 @@ Then, mount the channel: `(mount-channel <id>)`.
 
 Then, it is possible to get a binary file already existing in the
 filesystem with `(get <hash>)`, which returns an `'(unsigned-byte 8)`
-stream. 
+stream. (Or, NIL on hash collision or other failure)
 
 To delete a file, we do `(del <hash>)`. To put a file, we do `(put
 stream)` where stream is some stream of bytes.
