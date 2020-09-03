@@ -108,14 +108,18 @@
 (defun put (stream)
   "upload file into filesystem, and then return the hash at which this
   is stored, or NIL on error"
-  (let ((arr (make-array 2048 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
+  (let ((arr (make-array 2048 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+        (record))
     (loop while (listen stream)
        do (vector-push-extend (read-byte stream) arr))
-    (resolve-to-record arr)))
+    (setf record (lispcord.http:from-id (resolve-to-record arr) *mntc*))
+    ; upload new file, then add to record
+    ))
 
 (defun del (hash)
   "delete file with given hash from filesystem, returning T on delete,
-  NIL on no delete")
+  NIL on no delete"
+  )
 
 (defun get (hash)
   "get binary file from filesystem. returns '(unsigned-byte 8) stream")
