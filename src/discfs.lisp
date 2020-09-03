@@ -86,24 +86,32 @@
     (assert (not (= 0 (length pinned))))
     (setf *jmp* (aref pinned 0))))
 
-(defun put (stream)
-  "upload file into filesystem, and then return the hash at which this
-  is stored, or NIL on error"
-  (let ((arr (make-array 2048 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
-        (off0) (off1) (jmpsnow) (filesnow))
-    (loop while (listen stream)
-       do (vector-push-extend (read-byte stream) arr))
+(defun resolve-to-record (arr)
+  "jumps through tables to get to final <placeholder> message which
+  will point to actual file"
+  (let ((off0) (off1) (jmpsnow))
     (let ((sha256sum (ironclad:digest-sequence :sha256 arr)))
       (setf off0 (mod (aref sha256sum (- (length sha256sum) 1)) 64))
       (setf off1 (mod (aref sha256sum (- (length sha256sum) 2)) 64))
-      ;(format t "0: ~d  1: ~d~%" off0 off1)
+      ;;(format t "0: ~d  1: ~d~%" off0 off1)
       (setf jmpsnow (bytes-to-uint64
-                       (ironclad:hex-string-to-byte-array
-                        (format nil "0~a" (nth off0 (split-sequence:split-sequence #\Newline (lc:content *jmp*)))))))
-      (setf filesnow (bytes-to-uint64
-                    (ironclad:hex-string-to-byte-array
-                     (format nil "0~a" (nth off1 (split-sequence:split-sequence #\Newline (lc:content (lispcord.http:from-id jmpsnow *mntc*)))))))))
-    (format t "j: ~x  f: ~x" jmpsnow filesnow)))
+                     (ironclad:hex-string-to-byte-array
+                      (let ((hx (nth off0
+                                     (split-sequence:split-sequence #\Newline (lc:content *jmp*)))))
+                        (if (not (= (length hx) 16)) (format nil "0~a" hx) hx)))))
+      (bytes-to-uint64
+       (ironclad:hex-string-to-byte-array
+        (let ((hx (nth off1
+                       (split-sequence:split-sequence #\Newline (lc:content (lispcord.http:from-id jmpsnow *mntc*))))))
+          (if (not (= (length hx) 16)) (format nil "0~a" hx) hx)))))))
+
+(defun put (stream)
+  "upload file into filesystem, and then return the hash at which this
+  is stored, or NIL on error"
+  (let ((arr (make-array 2048 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
+    (loop while (listen stream)
+       do (vector-push-extend (read-byte stream) arr))
+    (resolve-to-record arr)))
 
 (defun del (hash)
   "delete file with given hash from filesystem, returning T on delete,
