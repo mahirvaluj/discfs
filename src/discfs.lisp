@@ -1,5 +1,5 @@
 (defpackage :discfs
-  (:use :cl :lispcord :ironclad :split-sequence)
+  (:use :cl :lispcord :ironclad :split-sequence :qbase64)
   (:shadow :get))
 (in-package :discfs)
 
@@ -22,6 +22,12 @@
              (lc:name (lc:user ready))
              (lc:session-id ready))))
 
+
+;; making sure bot is alive
+(add-event-handler
+ :on-message-create
+ (lambda (msg) (format t "message ID: ~a~%" (lc:id msg)) (if (string= (lc:content msg) "discfs:ping") (reply msg "pong!"))))
+
 (defun bytes-to-uint64 (bytes)
   (let ((n 0))
     (do ((i 7 (- i 1))
@@ -30,10 +36,12 @@
       (setf n (+ n (ash (aref bytes j) (* 8 i)))))
     n))
 
-;; making sure bot is alive
-(add-event-handler
- :on-message-create
- (lambda (msg) (format t "message ID: ~a~%" (lc:id msg)) (if (string= (lc:content msg) "discfs:ping") (reply msg "pong!"))))
+(defun hex-to-snowflake (hx)
+  "handles the fact that the snowflakes might need a padding 0 and converts hex string into snowflake integer"
+  (bytes-to-uint64
+   (ironclad:hex-string-to-byte-array
+    (let ((hx ))
+      (if (not (= (length hx) 16)) (format nil "0~a" hx) hx)))))
 
 ;; In all the following: HASH is a sha-256 hash, ID is a 64-bit uint
 ;; represented as hex
@@ -94,27 +102,67 @@
       (setf off0 (mod (aref sha256sum (- (length sha256sum) 1)) 64))
       (setf off1 (mod (aref sha256sum (- (length sha256sum) 2)) 64))
       ;;(format t "0: ~d  1: ~d~%" off0 off1)
-      (setf jmpsnow (bytes-to-uint64
-                     (ironclad:hex-string-to-byte-array
-                      (let ((hx (nth off0
-                                     (split-sequence:split-sequence #\Newline (lc:content *jmp*)))))
-                        (if (not (= (length hx) 16)) (format nil "0~a" hx) hx)))))
-      (bytes-to-uint64
-       (ironclad:hex-string-to-byte-array
-        (let ((hx (nth off1
-                       (split-sequence:split-sequence #\Newline (lc:content (lispcord.http:from-id jmpsnow *mntc*))))))
-          (if (not (= (length hx) 16)) (format nil "0~a" hx) hx)))))))
+      (setf jmpsnow
+            (hex-to-snowflake
+             (nth off0
+                  (split-sequence:split-sequence #\Newline (lc:content *jmp*)))))
+      (lispcord.http:from-id (hex-to-snowflake
+                              (nth off1
+                                   (split-sequence:split-sequence #\Newline (lc:content (lispcord.http:from-id jmpsnow *mntc*)))))
+                             *mntc*))))
+
+;; will upload chunks of 1425 bytes (as this will allow for 
+(defun upload-file (file-arr)
+  "upload file as base64 blobs in channel, then return snowflake for
+  head message or NIL on fail"
+  (let ((b64 (qbase64:encode-bytes file-arr))
+        (acc))
+    (loop for i from 0 to (length b64) by 1900
+       do (push (subseq b64 i (min (length b64) (+ i 1900))) acc))
+    ;; because we're pushing the bits, acc is already ordereed from
+    ;; the end to the start of the file! magic!
+    (let ((psnow))
+      (dolist (b64subst acc)
+        (setf psnow (lc:id (lispcord.http:create (if (not (null psnow))
+                                                     (format nil "~a~%NEXT ~x" b64subst psnow)
+                                                     b64subst)
+                                                 *mntc*)))
+        (when (null psnow)
+          (return-from upload-file nil)))
+      psnow)))
+
+(defun add-to-record (record file-arr)
+  "uploads the file then adds it to the record"
+  (let ((file-head (upload-file file-arr)))
+    (when (null (file-head))
+      (error "File upload failed"))
+    (let ((sha256hx (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha256 arr)))))
+    (cond ((string= (lc:content record) "placeholder")
+           (lispcord.http:edit (format nil "~a ~a" sha256hx file-head) record))
+          ;; snowflake is 16 len, plus space, plus NEXT, plus 3 bytes
+          ;; extra, so 25. This checks whether we can append the record
+          ((not (null (search sha256hx (lc:content record))))
+           ;; this means hash collision
+           (return-from add-to-record nil))
+          ((not (null (search "NEXT" (lc:content record))))
+           ;; this means this record is full, go to NEXT
+           ;; CUT
+           )
+          ((<= (+ 60 (length (lc:content reocrd))) 2000)
+           ;; we can safely append here
+           ())
+          ((<= (+ 60 (length (lc:content reocrd))) 2000)
+           ;; we can safely append here
+           ()))))
 
 (defun put (stream)
   "upload file into filesystem, and then return the hash at which this
   is stored, or NIL on error"
-  (let ((arr (make-array 2048 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
-        (record))
+  (let ((arr (make-array 2048 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
     (loop while (listen stream)
        do (vector-push-extend (read-byte stream) arr))
-    (setf record (lispcord.http:from-id (resolve-to-record arr) *mntc*))
-    ; upload new file, then add to record
-    ))
+    (add-to-record (resolve-to-record arr) arr)))
+
 
 (defun del (hash)
   "delete file with given hash from filesystem, returning T on delete,
