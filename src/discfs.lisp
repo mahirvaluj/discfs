@@ -1,16 +1,18 @@
 (defpackage :discfs
-  (:use :cl :lispcord))
+  (:use :cl :lispcord :ironclad :split-sequence)
+  (:shadow :get))
 (in-package :discfs)
 
 ;; This is to load the token
 (load #p"secret.lisp")
-(if *token*
+(if (boundp '*token*)
     (format t "*token* is ~a~%" *token*)
     (error "discfs:*token* not defined in src/secret.lisp"))
 
 (defbot *discfs* *token*)
 
 (defvar *mntc*)
+(defvar *jmp*)
 (defvar *dbg-chnl*)
 
 (add-event-handler
@@ -19,6 +21,14 @@
      (format t "User ~a~%Session ~a~%is ready~%"
              (lc:name (lc:user ready))
              (lc:session-id ready))))
+
+(defun bytes-to-uint64 (bytes)
+  (let ((n 0))
+    (do ((i 7 (- i 1))
+         (j 0 (+ j 1)))
+        ((= j 8))
+      (setf n (+ n (ash (aref bytes j) (* 8 i)))))
+    n))
 
 ;; making sure bot is alive
 (add-event-handler
@@ -58,6 +68,7 @@
           (vouter (make-array 64 :element-type 'integer)))
       (dotimes (i 64)
         (dotimes (j 64)
+          (format t "i ~d j ~d~%" i j)
           (setf (aref v j) (lc:id (lispcord.http:create "placeholder" c))))
         (setf (aref vouter i) (lc:id (lispcord.http:create (with-output-to-string (s)
                                                              (loop for id across v do
@@ -65,17 +76,34 @@
                                                            c))))
       (lispcord.http:pin (lispcord.http:create
                           (with-output-to-string (s)
-                            (loop for id across v do
+                            (loop for id across vouter do
                                  (format s "~x~%" id)))
                           c)))))
 
 (defun mount-channel (channel-id)
   (setf *mntc* (lispcord.http:from-id channel-id :channel))
-  (assert (not (= 0 (length (lispcord.http:get-pinned *mntc*))))))
+  (let ((pinned (lispcord.http:get-pinned *mntc*)))
+    (assert (not (= 0 (length pinned))))
+    (setf *jmp* (aref pinned 0))))
 
 (defun put (stream)
   "upload file into filesystem, and then return the hash at which this
-  is stored, or NIL on error")
+  is stored, or NIL on error"
+  (let ((arr (make-array 2048 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+        (off0) (off1) (jmpsnow) (filesnow))
+    (loop while (listen stream)
+       do (vector-push-extend (read-byte stream) arr))
+    (let ((sha256sum (ironclad:digest-sequence :sha256 arr)))
+      (setf off0 (mod (aref sha256sum (- (length sha256sum) 1)) 64))
+      (setf off1 (mod (aref sha256sum (- (length sha256sum) 2)) 64))
+      ;(format t "0: ~d  1: ~d~%" off0 off1)
+      (setf jmpsnow (bytes-to-uint64
+                       (ironclad:hex-string-to-byte-array
+                        (format nil "0~a" (nth off0 (split-sequence:split-sequence #\Newline (lc:content *jmp*)))))))
+      (setf filesnow (bytes-to-uint64
+                    (ironclad:hex-string-to-byte-array
+                     (format nil "0~a" (nth off1 (split-sequence:split-sequence #\Newline (lc:content (lispcord.http:from-id jmpsnow *mntc*)))))))))
+    (format t "j: ~x  f: ~x" jmpsnow filesnow)))
 
 (defun del (hash)
   "delete file with given hash from filesystem, returning T on delete,
