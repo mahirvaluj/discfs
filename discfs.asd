@@ -4,7 +4,8 @@
   :license "MIT"
   :components
   ((:module src
-            :sertial t
+            :serial t
             :components
-            ((:file "discfs")
-             (:file "secret")))))
+            ((:file "package")
+             (:file "secret")
+             (:file "discfs")))))

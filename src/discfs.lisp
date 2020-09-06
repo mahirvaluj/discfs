@@ -1,16 +1,14 @@
-(defpackage :discfs
-  (:use :cl :lispcord :ironclad :split-sequence :qbase64 :str)
-  (:shadow :get))
 (in-package :discfs)
 
 ;; This is to load the token
-(load #p"secret.lisp")
+; (load #p"secret.lisp")
 (if (boundp '*token*)
     (format t "*token* is ~a~%" *token*)
     (error "discfs:*token* not defined in src/secret.lisp"))
 
 (defbot *discfs* *token*)
 
+;(defvar *token*)
 (defvar *mntc*)
 (defvar *jmp*)
 (defvar *dbg-chnl*)
@@ -90,6 +88,7 @@
                           c)))))
 
 (defun mount-channel (channel-id)
+  (start)
   (setf *mntc* (lispcord.http:from-id channel-id :channel))
   (let ((pinned (lispcord.http:get-pinned *mntc*)))
     (assert (not (= 0 (length pinned))))
