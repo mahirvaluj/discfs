@@ -1,14 +1,11 @@
 (in-package :discfs)
 
-;; This is to load the token
-; (load #p"secret.lisp")
 (if (boundp '*token*)
     (format t "*token* is ~a~%" *token*)
     (error "discfs:*token* not defined in src/secret.lisp"))
 
 (defbot *discfs* *token*)
 
-;(defvar *token*)
 (defvar *mntc*)
 (defvar *jmp*)
 (defvar *dbg-chnl*)
