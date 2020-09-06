@@ -13,8 +13,8 @@ filesystem with `(get <hash-string>)`, which returns an `'(unsigned-byte 8)`
 array. (Or, NIL on hash collision or other failure)
 
 To delete a file, we do `(del <hash-string>)`. To put a file, we do
-`(put stream)` or `(put array)` passing either some stream of `(unsigned-byte 8)`, or an
-array of `(unsigned-byte 8)`.
+`(put stream)` or `(put array)` or `(put #p"/path/to/file")` passing either some stream of `(unsigned-byte 8)`, or an
+array of `(unsigned-byte 8)`, or a pathname.
 
 This is just for fun! Getting and putting files (especially large
 ones) almost certaintly takes an inordinate amount of time, as Discord

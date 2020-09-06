@@ -187,6 +187,10 @@
                                  record))))
     sha256hx))
 
+(defmethod put ((path pathname))
+  (with-open-file (s path :element-type '(unsigned-byte 8))
+    (put s)))
+
 (defmethod put ((stream stream))
   "upload file into filesystem, and then return the hash at which this
   is stored, or NIL on error"
