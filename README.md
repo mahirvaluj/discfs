@@ -9,11 +9,12 @@ take something like 4 hours, because of Discord rate limiting.
 Then, mount the channel: `(mount-channel <id>)`.
 
 Then, it is possible to get a binary file already existing in the
-filesystem with `(get <hash>)`, which returns an `'(unsigned-byte 8)`
+filesystem with `(get <hash-string>)`, which returns an `'(unsigned-byte 8)`
 stream. (Or, NIL on hash collision or other failure)
 
-To delete a file, we do `(del <hash>)`. To put a file, we do `(put
-stream)` where stream is some stream of bytes.
+To delete a file, we do `(del <hash-string>)`. To put a file, we do
+`(put stream)` or `(put array)` passing either some stream of `(unsigned-byte 8)`, or an
+array of `(unsigned-byte 8)`.
 
 This is just for fun! Getting and putting files (especially large
 ones) almost certaintly takes an inordinate amount of time, as Discord
