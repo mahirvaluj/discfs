@@ -95,22 +95,24 @@
     (assert (not (= 0 (length pinned))))
     (setf *jmp* (aref pinned 0))))
 
-(defun resolve-to-record (arr)
+(defmethod resolve-to-record (arr (tp (eql :file)))
   "jumps through tables to get to final <placeholder> message which
   will point to actual file"
+  (resolve-to-record (ironclad:digest-sequence :sha256 arr) :hash))
+
+(defmethod resolve-to-record (hash-str (tp (eql :hash)))
   (let ((off0) (off1) (jmpsnow))
-    (let ((sha256sum (ironclad:digest-sequence :sha256 arr)))
-      (setf off0 (mod (aref sha256sum (- (length sha256sum) 1)) 64))
-      (setf off1 (mod (aref sha256sum (- (length sha256sum) 2)) 64))
-      ;;(format t "0: ~d  1: ~d~%" off0 off1)
-      (setf jmpsnow
-            (hex-to-snowflake
-             (nth off0
-                  (split-sequence:split-sequence #\Newline (lc:content *jmp*)))))
-      (lispcord.http:from-id (hex-to-snowflake
-                              (nth off1
-                                   (split-sequence:split-sequence #\Newline (lc:content (lispcord.http:from-id jmpsnow *mntc*)))))
-                             *mntc*))))
+    (setf off0 (mod (aref hash-str (- (length hash-str) 1)) 64))
+    (setf off1 (mod (aref hash-str (- (length hash-str) 2)) 64))
+    ;;(format t "0: ~d  1: ~d~%" off0 off1)
+    (setf jmpsnow
+          (hex-to-snowflake
+           (nth off0
+                (split-sequence:split-sequence #\Newline (lc:content *jmp*)))))
+    (lispcord.http:from-id (hex-to-snowflake
+                            (nth off1
+                                 (split-sequence:split-sequence #\Newline (lc:content (lispcord.http:from-id jmpsnow *mntc*)))))
+                           *mntc*)))
 
 ;; will upload chunks of 1425 bytes (as this will allow for 
 (defun upload-file (file-arr)
@@ -132,73 +134,137 @@
           (return-from upload-file nil)))
       psnow)))
 
-(defun add-to-record (record file-arr)
+(defun next-record (recordio)
+  (let ((record (lispcord.http:from-id (lc:id recordio) *mntc*)))
+    (when (null (search "NEXT" (lc:content record)))
+      (return-from next-record nil))
+    (let ((next-index (search "NEXT" (lc:content record))))
+      (lispcord.http:from-id
+       (hex-to-snowflake (subseq (lc:content record)
+                                 (+ 5 next-index)
+                                 (min (length (lc:content record))
+                                      (let ((v (search (format nil "~%")
+                                                       (lc:content record)
+                                                       :start2 next-index)))
+                                        (if (not (null v))
+                                            v
+                                            2100)))))
+       *mntc*))))
+
+(defun add-to-record (recordio file-arr)
   "uploads the file then adds it to the record"
   ;; refresh record (because previous edits of the record could have
   ;; caused it to get out of sync
-  (setf record (lispcord.http:from-id (lc:id record) *mntc*))
-  (let ((sha256hx (ironclad:byte-array-to-hex-string (ironclad:digest-sequence :sha256 file-arr))))
+  (let* ((record (lispcord.http:from-id (lc:id recordio) *mntc*))
+         (sha256 (ironclad:digest-sequence :sha256 file-arr))
+         (sha256hx (ironclad:byte-array-to-hex-string sha256)))
     (when (not (null (search sha256hx (lc:content record))))
       ;; this means hash collision
       (return-from add-to-record nil))
-    (let ((file-head (upload-file file-arr)))
-      (when (null file-head)
-        (error "File upload failed"))
-      (cond ((string= (lc:content record) "placeholder")
-             (lispcord.http:edit (format nil "~a ~a" sha256hx file-head) record))
-            ((<= (+ 110 (length (lc:content record))) 2000)
-             ;; we can safely append here. Hash is 64 long, plus 17
-             ;; for ID of b64 file dump, plus 29 for hypothetical NEXT
+    (cond ((string= (lc:content record) "placeholder")
+           ;; empty record
+           (let ((file-head (upload-file file-arr)))
+             (when (null file-head)
+               (error "File upload failed"))
+             (lispcord.http:edit (format nil "~a ~x" sha256hx file-head) record)))
+          ((<= (+ 110 (length (lc:content record))) 2000)
+           ;; we can safely append here. Hash is 64 long, plus 17
+           ;; for ID of b64 file dump, plus 29 for hypothetical NEXT
+           (let ((file-head (upload-file file-arr)))
+             (when (null file-head)
+               (error "File upload failed"))
              (lispcord.http:edit (concatenate 'string
                                               (str:replace-all (format nil "~%") "\\n" (lc:content record))
-                                              (format nil "\\n~a ~a" sha256hx file-head))
-                                 record))
-            ((not (null (search "NEXT" (lc:content record))))
-             ;; this means this record is full (previous check didn't
-             ;; succeed) and there exists a NEXT, go to NEXT
-             (let* ((next-index (search "NEXT" (lc:content record)))
-                    (next-record (lispcord.http:from-id
-                                  (hex-to-snowflake (subseq (lc:content record)
-                                                            (+ 5 next-index)
-                                                            (min (length (lc:content record))
-                                                                 (let ((v (search (format nil "~%")
-                                                                                  (lc:content record)
-                                                                                  :start2 next-index)))
-                                                                   (if (not (null v))
-                                                                       v
-                                                                       2100)))))
-                              *mntc*)))
-               (add-to-record next-record file-arr)))
-            (t
-             ;; this means search for NEXT failed and we need to create a new NEXT
-             (let ((new-record (lispcord.http:create "placeholder" *mntc*)))
-               (lispcord.http:edit (concatenate 'string
-                                                (str:replace-all (format nil "~%") "\\n" (lc:content record))
-                                                (format nil "\\nNEXT ~x" (lc:id new-record)))
-                                   record)))))))
+                                              (format nil "\\n~a ~x" sha256hx file-head))
+                                 record)))
+          ((not (null (search "NEXT" (lc:content record))))
+           ;; this means this record is full (previous check didn't
+           ;; succeed) and there exists a NEXT, go to NEXT
+           (add-to-record (next-record record) file-arr))
+          (t
+           ;; this means search for NEXT failed and we need to create a new NEXT
+           (let* ((file-head (upload-file file-arr))
+                  (new-record (lispcord.http:create (format nil "~a ~x" sha256hx file-head) *mntc*)))
+             (lispcord.http:edit (concatenate 'string
+                                              (str:replace-all (format nil "~%") "\\n" (lc:content record))
+                                              (format nil "\\nNEXT ~x" (lc:id new-record)))
+                                 record))))
+    sha256hx))
 
-(defun put (stream)
+(defmethod put ((stream stream))
   "upload file into filesystem, and then return the hash at which this
   is stored, or NIL on error"
   (let ((arr (make-array 2048 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
     (loop while (listen stream)
        do (vector-push-extend (read-byte stream) arr))
-    (add-to-record (resolve-to-record arr) arr)))
+    (add-to-record (resolve-to-record arr :file) arr)))
 
+(defmethod put ((arr array))
+  "upload array into filesystem, and then return the hash at which this
+  is stored, or NIL on error"
+  (add-to-record (resolve-to-record arr :file) arr))
 
-(defun del (hash)
+(defun remove-from-record (recordio hash-str)
+  "remove given hash from the record"
+  (let ((record (lispcord.http:from-id (lc:id recordio) *mntc*))
+        (hash-st (string-downcase hash-str))
+        (done))
+    (lispcord.http:edit
+     (funcall
+      #'(lambda ()
+          (eval
+           `(concatenate 'string
+                         ,@(map 'list
+                                #'(lambda (z)
+                                    (concatenate 'string z "\\n"))
+                                (remove-if
+                                 #'(lambda (s)
+                                     (if (not (null (search hash-st s)))
+                                         (setf done t)
+                                         nil))
+                                 (split-sequence:split-sequence #\Newline (lc:content record))))))))
+     record)
+    (when (not done)
+      (if (not (null (search "NEXT" (lc:content record))))
+          (remove-from-record (next-record record) hash-st)
+          nil))))
+
+(defun del (hash-str)
   "delete file with given hash from filesystem, returning T on delete,
-  NIL on no delete"
-  )
+  NIL on fail"
+  (if (not (null (remove-from-record (resolve-to-record hash-str :hash)
+                                     hash-str)))
+      t
+      nil))
 
-(defun get (hash)
-  "get binary file from filesystem. returns '(unsigned-byte 8) stream")
+(defun pull-buf (message)
+  "given the head of a file, return '(unsigned-byte 8) array of file"
+  (let ((acc))
+    (labels ((f (msg)
+               (let ((spt (split-sequence #\newline (lc:content msg))))
+                 (push (nth 0 spt) acc)
+                 (when (consp (cdr spt))
+                   (f (lispcord.http:from-id (hex-to-snowflake (substring 5 100 (nth 1 spt)))
+                                             *mntc*))))))
+      (f message))
+    (qbase64:decode-string (eval `(concatenate 'string ,@(nreverse acc))))))
 
-;; (defun reg (id path)
-;;   "this will add the hash to the filesystem in the given message. if
-;;   the message is too full, go to NEXT message"
-;;   (let ((msg (lispcord.http:from-id id :message)))
-;;     ) )
+(defun get (hash-str)
+  "get binary file from filesystem. returns '(unsigned-byte 8) array"
+  (labels ((f (record)
+             (let ((i (search hash-str record)))
+               (cond
+                 ((not (null i))
+                  (pull-buf
+                   (lispcord.http:from-id (hex-to-snowflake
+                                           (nth 1 (split-sequence:split-sequence
+                                                   #\Space
+                                                   (find-if #'(lambda (s) (string= hash-str s :end2 64))
+                                                            (split-sequence:split-sequence #\Newline (lc:content record))))))
+                                          *mntc*)))
+                 ((not (null (search "NEXT" (lc:content record))))
+                  (f (next-record record)))))))
+    (f (resolve-to-record hash-str :hash))))
 
 (defun start ()
   (connect *discfs*))
