@@ -6,4 +6,5 @@
     ((:module src
               :sertial t
               :components
-              ((:file "discfs")))))
+              ((:file "discfs")
+               (:file "secret")))))
